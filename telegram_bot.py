@@ -16,14 +16,13 @@ GOOGLE_SHEET_KEY = os.environ.get("SHEET_ID")
 creds_json = os.environ.get("GOOGLE_CREDENTIALS_JSON")
 creds_dict = json.loads(creds_json)
 
-creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-
 # ---------- GOOGLE SHEETS ----------
 scope = [
     "https://spreadsheets.google.com/feeds",
     "https://www.googleapis.com/auth/drive"
 ]
-creds = ServiceAccountCredentials.from_json_keyfile_name(JSON_KEY_FILE, scope)
+
+creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 client = gspread.authorize(creds)
 sheet = client.open_by_key(GOOGLE_SHEET_KEY).get_worksheet(0)
 
