@@ -2,18 +2,27 @@
 
 import os
 import json
+import random
+import datetime
+from pytz import timezone
 
 import gspread
-import random
-from datetime import datetime, timedelta
-from oauth2client.service_account import ServiceAccountCredentials
 from telegram import Update
-from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters, JobQueue
+from telegram.ext import (
+    ApplicationBuilder,
+    ContextTypes,
+    MessageHandler,
+    CommandHandler,
+    filters,
+)
 
-# ---------- НАСТРОЙКИ ----------
+from oauth2client.service_account import ServiceAccountCredentials
+
+# ---------- CONFIG ----------
 TOKEN = os.environ.get("BOT_TOKEN")
 GOOGLE_SHEET_KEY = os.environ.get("SHEET_ID")
 creds_json = os.environ.get("GOOGLE_CREDENTIALS_JSON")
+
 creds_dict = json.loads(creds_json)
 
 # ---------- GOOGLE SHEETS ----------
@@ -24,66 +33,115 @@ scope = [
 
 creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 client = gspread.authorize(creds)
-sheet = client.open_by_key(GOOGLE_SHEET_KEY).get_worksheet(0)
+sheet = client.open_by_key(GOOGLE_SHEET_KEY).sheet1
 
-# ---------- ПОДПИСЧИКИ ----------
+# ---------- TIMEZONE ----------
+MOSCOW_TZ = timezone("Europe/Moscow")
+
+# ---------- MEMORY ----------
 subscribers = set()
+user_times = {}   # chat_id -> "HH:MM"
 
-# ---------- ФУНКЦИЯ ОТПРАВКИ КАРТОЧКИ ----------
-async def send_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    data = sheet.get_all_records()  # обновляем данные перед отправкой
-    row = random.choice(data)
-    message = (
-        "✨✨✨✨✨✨\n\n"  # пропуск строки после эмодзи
+# ---------- HELPERS ----------
+def get_words():
+    return sheet.get_all_records()
+
+def pick_word():
+    data = get_words()
+    return random.choice(data) if data else None
+
+def format_word(row):
+    return (
+        "✨✨✨✨✨✨\n\n"
         f"💡 <b>{row.get('Word','')}</b>\n"
-        "————\n"  # прямая линия после слова
+        "————\n"
         f"<i>{row.get('Sentence','')}</i>\n"
         f"🔹 Synonym: <b>{row.get('Synonym','')}</b>\n"
-        f"🔸 Opposite: <b>{row.get('Opposite','')}</b>\n\n"  # пропуск строки после Opposite
+        f"🔸 Opposite: <b>{row.get('Opposite','')}</b>\n\n"
         "✨✨✨✨✨✨"
     )
-    await update.message.reply_text(message, parse_mode="HTML")
-    subscribers.add(update.effective_chat.id)
 
-# ---------- ФУНКЦИЯ ЕЖЕДНЕВНОЙ РАССЫЛКИ ----------
-async def daily_broadcast(context: ContextTypes.DEFAULT_TYPE):
-    data = sheet.get_all_records()  # обновляем данные перед рассылкой
-    for chat_id in subscribers:
-        row = random.choice(data)
-        message = (
-            "✨✨✨✨✨✨\n\n"
-            f"💡 <b>{row.get('Word','')}</b>\n"
-            "————\n"
-            f"<i>{row.get('Sentence','')}</i>\n"
-            f"🔹 Synonym: <b>{row.get('Synonym','')}</b>\n"
-            f"🔸 Opposite: <b>{row.get('Opposite','')}</b>\n\n"
-            "✨✨✨✨✨✨"
-        )
-        try:
-            await context.bot.send_message(chat_id=chat_id, text=message, parse_mode="HTML")
-        except Exception as e:
-            print(f"Не удалось отправить сообщение {chat_id}: {e}")
+# ---------- ADD WORD ----------
+async def add_word(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        text = " ".join(context.args)
+        parts = [p.strip() for p in text.split("|")]
 
-# ---------- ГЛАВНАЯ ФУНКЦИЯ ----------
+        if len(parts) != 4:
+            await update.message.reply_text(
+                "Формат:\n/add word | sentence | synonym | opposite"
+            )
+            return
+
+        sheet.append_row(parts)
+        await update.message.reply_text("✅ Слово добавлено!")
+
+    except Exception as e:
+        await update.message.reply_text(f"Ошибка: {e}")
+
+# ---------- SET TIME ----------
+async def set_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        time_str = context.args[0]  # HH:MM
+        chat_id = update.effective_chat.id
+
+        user_times[chat_id] = time_str
+        subscribers.add(chat_id)
+
+        await update.message.reply_text(f"⏰ Время установлено: {time_str}")
+
+    except:
+        await update.message.reply_text("Используй: /time 12:30")
+
+# ---------- MESSAGE HANDLER ----------
+async def send_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    word = pick_word()
+
+    if not word:
+        await update.message.reply_text("Слов пока нет.")
+        return
+
+    chat_id = update.effective_chat.id
+    subscribers.add(chat_id)
+
+    await update.message.reply_text(format_word(word), parse_mode="HTML")
+
+# ---------- SCHEDULE CHECK ----------
+async def check_schedule(context: ContextTypes.DEFAULT_TYPE):
+    now = datetime.datetime.now(MOSCOW_TZ).strftime("%H:%M")
+
+    data = get_words()
+    if not data:
+        return
+
+    for chat_id, user_time in user_times.items():
+        if user_time == now:
+            word = random.choice(data)
+
+            try:
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=format_word(word),
+                    parse_mode="HTML"
+                )
+            except Exception as e:
+                print(f"Error {chat_id}: {e}")
+
+# ---------- MAIN ----------
 def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
-    # Обработчик текстовых сообщений
+    # handlers
+    app.add_handler(CommandHandler("add", add_word))
+    app.add_handler(CommandHandler("time", set_time))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), send_card))
 
-    # ---------- JobQueue для ежедневной рассылки ----------
-    job_queue: JobQueue = app.job_queue
-    now = datetime.now()
-    # Отправка в 12:00 каждый день
-    first_run = now.replace(hour=12, minute=0, second=0, microsecond=0)
-    if now >= first_run:
-        first_run += timedelta(days=1)
-    delay = (first_run - now).total_seconds()
-    job_queue.run_repeating(daily_broadcast, interval=24*3600, first=delay)
+    # scheduler (каждую минуту проверяем время)
+    app.job_queue.run_repeating(check_schedule, interval=60, first=0)
 
-    # Запуск бота
-    print("Я НОВАЯ ВЕРСИЯ БОТА 🚀")
+    print("🚀 BOT STARTED")
     app.run_polling()
 
 if __name__ == "__main__":
+    main()
     main()
