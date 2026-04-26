@@ -1,5 +1,8 @@
 
 
+import os
+import json
+
 import gspread
 import random
 from datetime import datetime, timedelta
@@ -8,9 +11,12 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters, JobQueue
 
 # ---------- НАСТРОЙКИ ----------
-TOKEN = "7996198841:AAEBWEgoonz8HLhRm012nMRVx39Ci4wMME4"
-GOOGLE_SHEET_KEY = "1S9-kSSk7tzpaTgNbEt-i1TWl5YHmksmHXt8a0Rw1IjY"
-JSON_KEY_FILE = "credentials.json"
+TOKEN = os.environ.get("BOT_TOKEN")
+GOOGLE_SHEET_KEY = os.environ.get("SHEET_ID")
+creds_json = os.environ.get("GOOGLE_CREDENTIALS_JSON")
+creds_dict = json.loads(creds_json)
+
+creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 
 # ---------- GOOGLE SHEETS ----------
 scope = [
