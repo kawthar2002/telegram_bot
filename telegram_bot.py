@@ -4,7 +4,9 @@ import os
 import json
 import random
 import datetime
-from pytz import timezone
+from datetime import timezone, timedelta
+
+MOSCOW_TZ = timezone(timedelta(hours=3))
 
 import gspread
 from telegram import Update
