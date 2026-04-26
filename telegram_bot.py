@@ -37,9 +37,6 @@ creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 client = gspread.authorize(creds)
 sheet = client.open_by_key(GOOGLE_SHEET_KEY).sheet1
 
-# ---------- TIMEZONE ----------
-MOSCOW_TZ = timezone("Europe/Moscow")
-
 # ---------- MEMORY ----------
 subscribers = set()
 user_times = {}   # chat_id -> "HH:MM"
